@@ -26,13 +26,18 @@ kotlin {
     }
 
     sourceSets {
+        val commonMain by getting {
+            dependencies {
+                // 资源（字体等）的 Res 类生成依赖它：必须挂在 commonMain 才会触发生成
+                implementation(compose.components.resources)
+            }
+        }
         val wasmJsMain by getting {
             dependencies {
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(compose.material3)
                 implementation(compose.ui)
-                implementation(compose.components.resources)
                 implementation("org.jetbrains.kotlinx:kotlinx-browser:0.2")
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
             }
