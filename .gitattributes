@@ -1,0 +1,7 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Ensure gradlew has executable bit on Unix systems
+**/gradlew text eol=lf
+**/gradlew.bat text eol=crlf
+*.sh text eol=lf

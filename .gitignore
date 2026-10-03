@@ -1,0 +1,40 @@
+# Binaries
+tweet-gif-web
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# Gradle
+frontend/.gradle/
+frontend/build/
+frontend/.kotlin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+tmp/
+*.tmp
+*.log
+
+# Environment files
+.env
+.env.local

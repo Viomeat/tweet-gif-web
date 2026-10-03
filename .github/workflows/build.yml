@@ -1,0 +1,226 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.22'
+  JAVA_VERSION: '17'
+
+jobs:
+  version:
+    name: Determine version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: bump
+        env:
+          BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || 'patch' }}
+        run: |
+          set -euo pipefail
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+          if [ -z "$latest" ]; then
+            latest="v0.0.0"
+          fi
+          echo "latest tag: $latest"
+          core="${latest#v}"
+          IFS='.' read -r major minor patch <<< "$core"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "unsupported bump type: $BUMP" >&2; exit 1 ;;
+          esac
+          version="${major}.${minor}.${patch}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "next version: v${version}"
+
+  build-frontend:
+    name: Build frontend
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Wasm frontend
+        working-directory: frontend
+        run: |
+          chmod +x ./gradlew
+          ./gradlew wasmJsBrowserDistribution --no-daemon --stacktrace
+
+      - name: Verify frontend output
+        run: |
+          set -euo pipefail
+          dist=frontend/build/dist/wasmJs/productionExecutable
+          test -f "$dist/index.html"
+          test -f "$dist/tweetgif.js"
+          test -f "$dist/tweetgif.wasm"
+          ls -la "$dist"
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/build/dist/wasmJs/productionExecutable/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Build linux-${{ matrix.arch }}
+    needs: [ version, build-frontend ]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download frontend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/build/dist/wasmJs/productionExecutable/
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          go mod download
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+            -o "dist/tweet-gif-web-linux-${{ matrix.arch }}" .
+
+      - name: Package archive
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          cd dist
+          mv "tweet-gif-web-linux-${ARCH}" tweet-gif-web
+          chmod 0755 tweet-gif-web
+          tar -czf "tweet-gif-web-linux-${ARCH}.tar.gz" tweet-gif-web
+          rm -f tweet-gif-web
+          sha256sum "tweet-gif-web-linux-${ARCH}.tar.gz" > "tweet-gif-web-linux-${ARCH}.tar.gz.sha256"
+          ls -lh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    needs: [ version, build ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+
+      - name: Prepare installer
+        run: |
+          set -euo pipefail
+          cp install.sh dist/install.sh
+          chmod 0755 dist/install.sh
+          cd dist
+          sha256sum install.sh > install.sh.sha256
+          ls -lh
+
+      - name: Create and push tag
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG already exists"
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/install.sh
+            dist/install.sh.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
