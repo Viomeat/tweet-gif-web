@@ -120,6 +120,10 @@ parse_args() {
     ''|*[!0-9]*) die "端口必须是数字: $PORT" ;;
   esac
   [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "端口超出范围: $PORT"
+  case "$VERSION" in
+    latest|v[0-9]*) ;;
+    *) die "无效版本: $VERSION（应为 latest 或 vX.Y.Z）" ;;
+  esac
 }
 
 # ---------------------------------------------------------------- 系统检测
@@ -128,13 +132,12 @@ require_cmd() {
 }
 
 detect_os() {
+  # 注意：不要 source /etc/os-release —— 它会覆盖脚本自身的变量（如 VERSION）
+  OS_ID="unknown"
+  OS_LIKE=""
   if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    OS_ID="${ID:-unknown}"
-    OS_LIKE="${ID_LIKE:-}"
-  else
-    OS_ID="unknown"; OS_LIKE=""
+    OS_ID="$(sed -n 's/^ID=//p' /etc/os-release | head -n1 | tr -d '"')"
+    OS_LIKE="$(sed -n 's/^ID_LIKE=//p' /etc/os-release | head -n1 | tr -d '"')"
   fi
 }
 
@@ -714,9 +717,7 @@ action_health() {
 action_info() {
   echo "系统     : $(uname -srm)"
   if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    echo "发行版   : ${PRETTY_NAME:-未知}"
+    echo "发行版   : $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | head -n1 | tr -d '"')"
   fi
   echo "CPU      : $(nproc 2>/dev/null || echo '?') 核 $(uname -m)"
   if command -v free >/dev/null 2>&1; then
