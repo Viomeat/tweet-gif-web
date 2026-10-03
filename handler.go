@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -142,41 +144,58 @@ func serveFrontend() http.Handler {
 		// 读取文件
 		data, err := frontendFS.ReadFile(embedPath)
 		if err != nil {
-			// 对于 SPA，所有未找到的路径返回 index.html
-			if path != "/index.html" {
-				data, err = frontendFS.ReadFile("frontend/build/dist/wasmJs/productionExecutable/index.html")
-				if err != nil {
-					http.NotFound(w, r)
-					return
-				}
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			} else {
+			// 带扩展名的路径是静态资源（如升级后旧缓存引用的旧哈希 wasm），
+			// 不做 SPA 回退，直接 404，避免浏览器把 HTML 当 wasm 解析后白屏
+			if filepath.Ext(path) != "" {
 				http.NotFound(w, r)
 				return
 			}
-		} else {
-			// 设置正确的 Content-Type
-			ext := filepath.Ext(path)
-			switch ext {
-			case ".wasm":
-				w.Header().Set("Content-Type", "application/wasm")
-			case ".js":
-				w.Header().Set("Content-Type", "application/javascript")
-			case ".html":
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			case ".css":
-				w.Header().Set("Content-Type", "text/css")
-			case ".json":
-				w.Header().Set("Content-Type", "application/json")
-			case ".png":
-				w.Header().Set("Content-Type", "image/png")
-			case ".svg":
-				w.Header().Set("Content-Type", "image/svg+xml")
+			// SPA 路由回退到 index.html
+			data, err = frontendFS.ReadFile("frontend/build/dist/wasmJs/productionExecutable/index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
 			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			serveWithETag(w, r, data)
+			return
 		}
 
-		_, _ = w.Write(data)
+		// 设置正确的 Content-Type
+		ext := filepath.Ext(path)
+		switch ext {
+		case ".wasm":
+			w.Header().Set("Content-Type", "application/wasm")
+		case ".js":
+			w.Header().Set("Content-Type", "application/javascript")
+		case ".html":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		case ".css":
+			w.Header().Set("Content-Type", "text/css")
+		case ".json":
+			w.Header().Set("Content-Type", "application/json")
+		case ".png":
+			w.Header().Set("Content-Type", "image/png")
+		case ".svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
+		}
+
+		serveWithETag(w, r, data)
 	})
+}
+
+// serveWithETag 输出静态内容：no-cache + ETag 使浏览器每次都校验，
+// 内容未变化返回 304，版本升级后旧缓存立即失效（无需用户强刷）
+func serveWithETag(w http.ResponseWriter, r *http.Request, data []byte) {
+	sum := sha256.Sum256(data)
+	etag := fmt.Sprintf(`"%x"`, sum[:16])
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	_, _ = w.Write(data)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
