@@ -12,6 +12,15 @@
             height: 100%;
             background-color: #F7F4ED;
         }
+        /* Compose 画布按容器尺寸渲染：容器必须占满整个视口，
+           否则画布会退回默认高度（150px），下方露出大片背景色 */
+        #compose {
+            width: 100%;
+            height: 100%;
+        }
+        #compose canvas {
+            display: block;
+        }
         #err-panel {
             display: none;
             position: fixed;
