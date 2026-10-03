@@ -24,8 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeViewport
-import kotlinx.browser.document
-import kotlinx.browser.window
 import kotlinx.coroutines.launch
 
 @Composable
@@ -233,7 +231,7 @@ fun App() {
 
                                 Button(
                                     onClick = {
-                                        window.open(gifUrl, "_blank")
+                                        jsOpenNewTab(gifUrl)
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
@@ -264,7 +262,11 @@ fun GifImage(url: String) {
 }
 
 fun main() {
-    ComposeViewport(document.body!!) {
+    ComposeViewport("compose") {
         App()
     }
 }
+
+// 自定义 JS 互操作（替代 kotlinx.browser）
+@JsFun("(url) => window.open(url, '_blank')")
+private external fun jsOpenNewTab(url: String)

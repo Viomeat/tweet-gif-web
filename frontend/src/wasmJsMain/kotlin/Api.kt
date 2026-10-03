@@ -1,13 +1,11 @@
-import kotlinx.browser.window
 import kotlinx.coroutines.await
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.w3c.fetch.Headers
-import org.w3c.fetch.RequestInit
-import org.w3c.fetch.Response
-import kotlin.js.JsString
-import kotlin.js.toJsString
+import kotlin.js.Promise
+
+// 自定义 JS 互操作：不依赖 kotlinx-browser（其 external class 绑定在
+// webpack 生产包中缺失，会导致 LinkError），全部用 @JsFun 显式声明。
 
 @Serializable
 data class ConvertRequest(val url: String)
@@ -22,27 +20,34 @@ data class ConvertResponse(
 
 private val jsonCodec = Json { ignoreUnknownKeys = true }
 
+@JsFun("(url, body) => window.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })")
+private external fun jsPostJson(url: String, body: String): Promise<JsAny?>
+
+@JsFun("(r) => r.status")
+private external fun jsRespStatus(r: JsAny?): Int
+
+@JsFun("(r) => r.statusText")
+private external fun jsRespStatusText(r: JsAny?): String
+
+@JsFun("(r) => r.text()")
+private external fun jsRespText(r: JsAny?): Promise<JsAny?>
+
 suspend fun convertTweetToGif(tweetUrl: String): ConvertResponse {
     return try {
-        val headers = Headers()
-        headers.append("Content-Type", "application/json")
-        val init = RequestInit(
-            method = "POST",
-            headers = headers,
-            body = jsonCodec.encodeToString(ConvertRequest(url = tweetUrl)).toJsString()
-        )
+        val response: JsAny? = jsPostJson(
+            "/api/convert",
+            jsonCodec.encodeToString(ConvertRequest(url = tweetUrl))
+        ).await()
 
-        val response: Response = window.fetch("/api/convert", init).await()
-
-        if (response.status.toInt() !in 200..299) {
+        if (jsRespStatus(response).toInt() !in 200..299) {
             return ConvertResponse(
                 success = false,
-                error = "网络请求失败: ${response.status} ${response.statusText}"
+                error = "网络请求失败: ${jsRespStatus(response)} ${jsRespStatusText(response)}"
             )
         }
 
-        val bodyText: JsString = response.text().await()
-        jsonCodec.decodeFromString<ConvertResponse>(bodyText.toString())
+        val body: JsAny? = jsRespText(response).await()
+        jsonCodec.decodeFromString<ConvertResponse>(body.toString())
     } catch (e: Exception) {
         ConvertResponse(
             success = false,

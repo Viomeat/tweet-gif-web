@@ -12,9 +12,146 @@
             height: 100%;
             background-color: #F7F4ED;
         }
+        #err-panel {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(28, 27, 31, 0.94);
+            color: #fff;
+            font-family: ui-monospace, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            padding: 24px;
+            overflow: auto;
+            box-sizing: border-box;
+        }
+        #err-panel h2 { margin: 0 0 10px; font-size: 17px; }
+        #err-panel p { margin: 0 0 12px; color: #bbb; }
+        #err-panel pre {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 12px 14px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-width: 900px;
+        }
+        #err-panel button {
+            margin-top: 14px;
+            padding: 10px 24px;
+            font-size: 14px;
+            border: 0;
+            border-radius: 8px;
+            background: #89ABE3;
+            color: #fff;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
-<script type="application/javascript" src="tweetgif.js"></script>
+<div id="compose"></div>
+<div id="err-panel">
+    <h2>⚠️ 页面加载失败</h2>
+    <p id="err-hint">已自动尝试过一次清除缓存重载。请将下面的完整信息截图反馈。</p>
+    <pre id="err-detail"></pre>
+    <button onclick="location.replace(location.pathname + '?_r=' + Date.now())">强制重新加载</button>
+</div>
+<script>
+// 加载诊断与自愈：捕获 wasm 加载/实例化失败，第一次自动带缓存参数重载，
+// 仍失败则显示面板并输出详细诊断信息（便于截图反馈）。
+(function () {
+    var diag = { ua: navigator.userAgent, errors: [], missing: null };
+    window.__diag = diag;
+
+    var alreadyRetried = /[?&]_r=/.test(location.search);
+    try { alreadyRetried = alreadyRetried || sessionStorage.getItem('__tg_retry') === '1'; } catch (e) {}
+    diag.retried = alreadyRetried;
+
+    function showPanel() {
+        var el = document.getElementById('err-panel');
+        var detail = document.getElementById('err-detail');
+        if (!el || !detail) return;
+        detail.textContent = JSON.stringify(diag, null, 2);
+        el.style.display = 'block';
+    }
+
+    function retryOnce() {
+        try { sessionStorage.setItem('__tg_retry', '1'); } catch (e) {}
+        location.replace(location.pathname + '?_r=' + Date.now());
+    }
+
+    function captureImportError(e, importObject) {
+        if (!/LinkError/.test(String(e))) return;
+        var m = /Import #(\d+) "([^"]+)" "([^"]+)"/.exec(e.message);
+        if (!m) return;
+        var mod = importObject && importObject[m[2]];
+        diag.missing = {
+            importIndex: m[1],
+            module: m[2],
+            name: m[3],
+            moduleFound: !!mod,
+            keyFound: mod ? (m[3] in mod) : false,
+            keyType: mod ? typeof mod[m[3]] : 'n/a',
+            keyCount: mod ? Object.keys(mod).length : 0
+        };
+    }
+
+    try {
+        var origStreaming = WebAssembly.instantiateStreaming &&
+            WebAssembly.instantiateStreaming.bind(WebAssembly);
+        if (origStreaming) {
+            WebAssembly.instantiateStreaming = function (src, imp) {
+                return origStreaming(src, imp).catch(function (e) {
+                    captureImportError(e, imp);
+                    throw e;
+                });
+            };
+        }
+        var origInstantiate = WebAssembly.instantiate.bind(WebAssembly);
+        WebAssembly.instantiate = function (src, imp) {
+            return origInstantiate(src, imp).catch(function (e) {
+                captureImportError(e, imp);
+                throw e;
+            });
+        };
+    } catch (e) { diag.errors.push('HOOKFAIL:' + e.message); }
+
+    function onFatal(msg) {
+        diag.errors.push('FATAL:' + msg);
+        if (!alreadyRetried) { retryOnce(); return; }
+        showPanel();
+    }
+
+    window.addEventListener('error', function (e) {
+        diag.errors.push('ERR:' + e.message);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+        var msg = (e.reason && e.reason.message) || String(e.reason);
+        diag.errors.push('REJ:' + msg);
+        if (/LinkError|CompileError|Aborted|WebAssembly|wasm/i.test(msg)) onFatal(msg);
+    });
+
+    // 兜底：12 秒后仍没有 canvas 视为白屏
+    setTimeout(function () {
+        if (document.querySelector('canvas')) return;
+        if (!alreadyRetried && diag.errors.length === 0) { retryOnce(); return; }
+        showPanel();
+    }, 12000);
+
+    // 正常渲染后清除重试标记，升级时仍可自动恢复一次
+    var okTimer = setInterval(function () {
+        if (document.querySelector('canvas')) {
+            try { sessionStorage.removeItem('__tg_retry'); } catch (e) {}
+            clearInterval(okTimer);
+        }
+    }, 2000);
+
+    // 动态注入主脚本：重试时带缓存参数，确保 js 与 wasm 来自同一版本
+    var s = document.createElement('script');
+    s.type = 'application/javascript';
+    s.src = 'tweetgif.js' + (alreadyRetried ? '?_r=' + Date.now() : '');
+    document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>
