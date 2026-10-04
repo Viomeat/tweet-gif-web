@@ -38,3 +38,6 @@ tmp/
 # Environment files
 .env
 .env.local
+
+# ZCode session files
+.zcode/

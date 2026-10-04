@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>推文 GIF 转换器</title>
+    <!-- 预加载 PingFang 字体：路径 = dist 下 composeResources/<包名>/font/，防 FOUT -->
+    <link rel="preload"
+          href="./composeResources/com.tweetgif.tweet_gif_frontend.generated.resources/font/pingfangsc_regular.woff2"
+          as="fetch" type="font/woff2" crossorigin/>
+    <link rel="preload"
+          href="./composeResources/com.tweetgif.tweet_gif_frontend.generated.resources/font/pingfangsc_medium.woff2"
+          as="fetch" type="font/woff2" crossorigin/>
     <style>
         html, body {
             margin: 0;
@@ -58,6 +65,21 @@
     </style>
 </head>
 <body>
+<script>
+// 防闪：wasm 加载前按用户主题偏好设置背景，避免深色模式下白屏闪烁。
+// 两个色值与 Theme.kt 的 LIGHT_BACKGROUND_HEX / DARK_BACKGROUND_HEX 保持一致。
+(function () {
+    var DARK_BG = '#121316', LIGHT_BG = '#F7F4ED';
+    var pref = '';
+    try { pref = localStorage.getItem('tweetgif-theme') || ''; } catch (e) {}
+    var dark = pref === 'dark' || (pref !== 'light' &&
+        window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var bg = dark ? DARK_BG : LIGHT_BG;
+    document.documentElement.style.backgroundColor = bg;
+    document.body.style.backgroundColor = bg;
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+})();
+</script>
 <div id="compose"></div>
 <div id="err-panel">
     <h2>⚠️ 页面加载失败</h2>

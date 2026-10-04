@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
@@ -28,6 +29,14 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun App() {
+    var themePref by remember { mutableStateOf(readThemePref()) }
+    val systemDark by rememberSystemDark()
+    val darkTheme = when (themePref) {
+        ThemePref.LIGHT -> false
+        ThemePref.DARK -> true
+        ThemePref.SYSTEM -> systemDark
+    }
+
     var url by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var resultGifUrl by remember { mutableStateOf<String?>(null) }
@@ -36,15 +45,17 @@ fun App() {
 
     val scope = rememberCoroutineScope()
 
-    AppTheme {
+    AppTheme(darkTheme = darkTheme) {
+        val colors = MaterialTheme.colorScheme
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            PrimaryColor,
-                            BackgroundColor
+                            colors.primaryContainer,
+                            colors.background
                         )
                     )
                 )
@@ -54,8 +65,24 @@ fun App() {
                 topBar = {
                     TopAppBar(
                         title = { Text("推文 GIF 转换器") },
+                        actions = {
+                            TextButton(
+                                onClick = {
+                                    val next = if (darkTheme) ThemePref.LIGHT else ThemePref.DARK
+                                    themePref = next
+                                    writeThemePref(next)
+                                },
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = colors.onBackground
+                                )
+                            ) {
+                                Text(if (darkTheme) "浅色" else "深色")
+                            }
+                        },
                         colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent
+                            containerColor = Color.Transparent,
+                            titleContentColor = colors.onBackground,
+                            actionIconContentColor = colors.onBackground
                         )
                     )
                 }
@@ -74,9 +101,7 @@ fun App() {
                     // 输入卡片
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = SurfaceColor.copy(alpha = 0.95f)
-                        )
+                        colors = CardDefaults.cardColors(containerColor = colors.surface)
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -85,7 +110,7 @@ fun App() {
                             Text(
                                 text = "输入推文链接",
                                 style = MaterialTheme.typography.titleLarge,
-                                color = OnBackgroundColor
+                                color = colors.onSurface
                             )
 
                             OutlinedTextField(
@@ -118,11 +143,7 @@ fun App() {
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = url.isNotBlank() && !isLoading,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PrimaryColor,
-                                    contentColor = OnPrimaryColor
-                                )
+                                enabled = url.isNotBlank() && !isLoading
                             ) {
                                 Text(if (isLoading) "转换中..." else "转换为 GIF")
                             }
@@ -133,9 +154,7 @@ fun App() {
                     if (isLoading) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = SurfaceColor.copy(alpha = 0.95f)
-                            )
+                            colors = CardDefaults.cardColors(containerColor = colors.surface)
                         ) {
                             Column(
                                 modifier = Modifier
@@ -144,11 +163,11 @@ fun App() {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                CircularProgressIndicator(color = PrimaryColor)
+                                CircularProgressIndicator(color = colors.primary)
                                 Text(
                                     text = "正在处理中，请稍候...",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = OnBackgroundColor.copy(alpha = 0.7f)
+                                    color = colors.onSurfaceVariant
                                 )
                             }
                         }
@@ -158,24 +177,23 @@ fun App() {
                     errorMessage?.let { error ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFFFFDAD6).copy(alpha = 0.95f)
-                            )
+                            colors = CardDefaults.cardColors(containerColor = colors.errorContainer)
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "❌ 错误",
+                                    // 字体子集为 GB2312，❌/✅/🎬 等 emoji 无字形会渲染为空白
+                                    text = "错误",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFFBA1A1A)
+                                    color = colors.error
                                 )
                                 Text(
                                     text = error,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(0xFF410002)
+                                    color = colors.onErrorContainer
                                 )
                             }
                         }
@@ -185,19 +203,17 @@ fun App() {
                     resultGifUrl?.let { gifUrl ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFFD4F7DC).copy(alpha = 0.95f)
-                            )
+                            colors = CardDefaults.cardColors(containerColor = colors.tertiaryContainer)
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "✅ ${successMessage ?: "转换成功"}",
+                                    text = successMessage ?: "转换成功",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF1B5E20)
+                                    color = colors.onTertiaryContainer
                                 )
                             }
                         }
@@ -205,9 +221,7 @@ fun App() {
                         // GIF 预览卡片
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = SurfaceColor.copy(alpha = 0.95f)
-                            )
+                            colors = CardDefaults.cardColors(containerColor = colors.surface)
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -217,7 +231,7 @@ fun App() {
                                 Text(
                                     text = "GIF 预览",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = OnBackgroundColor
+                                    color = colors.onSurface
                                 )
 
                                 Box(
@@ -233,11 +247,7 @@ fun App() {
                                     onClick = {
                                         jsOpenNewTab(gifUrl)
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = PrimaryColor,
-                                        contentColor = OnPrimaryColor
-                                    )
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text("下载 GIF")
                                 }
@@ -255,9 +265,9 @@ fun App() {
 @Composable
 fun GifImage(url: String) {
     Text(
-        text = "🎬 GIF 已生成",
+        text = "GIF 已生成",
         style = MaterialTheme.typography.bodyMedium,
-        color = PrimaryColor
+        color = MaterialTheme.colorScheme.primary
     )
 }
 
